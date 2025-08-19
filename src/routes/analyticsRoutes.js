@@ -28,7 +28,7 @@ router.get('/events/top',
 
 // Device-specific analytics
 router.post('/devices/:id/logs', 
-  validate(deviceParamsSchema, 'params'),
+  validate(deviceParamsSchema, 'params'), 
   validate(createLogSchema), 
   analyticsController.createLog
 );
