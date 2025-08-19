@@ -1,6 +1,7 @@
 const DeviceLog = require('../models/DeviceLog');
 const Device = require('../models/Device');
 const { LOG_EVENTS } = require('../utils/constants');
+const mongoose = require('mongoose');
 
 /**
  * Verify device ownership helper
@@ -68,7 +69,29 @@ const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => 
   };
 
   const startTime = new Date(now.getTime() - rangeMap[range]);
-  const matchQuery = { device_id: deviceId, timestamp: { $gte: startTime, $lte: now } };
+  const deviceObjectId = new mongoose.Types.ObjectId(deviceId);
+  
+  const matchQuery = { 
+    device_id: deviceObjectId,
+    timestamp: { $gte: startTime, $lte: now } 
+  };
+
+  // Debug logging
+  console.log('Query details:', {
+    deviceId,
+    deviceObjectId,
+    startTime,
+    endTime: now,
+    matchQuery
+  });
+
+  // Check if there are any logs for this device (without time filter)
+  const totalLogsForDevice = await DeviceLog.countDocuments({ device_id: deviceObjectId });
+  console.log(`Total logs for device ${deviceId}:`, totalLogsForDevice);
+
+  // Check logs within time range
+  const logsInRange = await DeviceLog.countDocuments(matchQuery);
+  console.log(`Logs in time range:`, logsInRange);
 
   if (event) matchQuery.event = event;
 
@@ -86,6 +109,8 @@ const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => 
         },
       },
     ]);
+
+    console.log('Units consumed aggregation result:', unitsConsumed);
 
     const result = {
       device_id: deviceId,
