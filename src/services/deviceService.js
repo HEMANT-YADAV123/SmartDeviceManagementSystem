@@ -44,57 +44,8 @@ const getDevices = async (userId, filters = {}) => {
 const getDeviceById = async (deviceId, userId) => {
   const device = await Device.findOne({ _id: deviceId, owner_id: userId });
   if (!device) throw new Error('Device not found');
-  
+
   return device;
-};
-
-const updateDevice = async (deviceId, userId, updateData) => {
-  const device = await Device.findOneAndUpdate(
-    { _id: deviceId, owner_id: userId },
-    updateData,
-    { new: true, runValidators: true }
-  );
-  if (!device) throw new Error('Device not found');
-  return device;
-};
-
-const deleteDevice = async (deviceId, userId) => {
-  const device = await Device.findOneAndDelete({ _id: deviceId, owner_id: userId });
-  if (!device) throw new Error('Device not found');
-  return device;
-};
-
-const recordHeartbeat = async (deviceId, userId, status) => {
-  const device = await Device.findOneAndUpdate(
-    { _id: deviceId, owner_id: userId },
-    {
-      last_active_at: new Date(),
-      ...(status && { status }),
-    },
-    { new: true }
-  );
-  if (!device) throw new Error('Device not found');
-  return device;
-};
-
-const getInactiveDevices = async (thresholdHours = 24) => {
-  const thresholdDate = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
-
-  return await Device.find({
-    status: { $ne: DEVICE_STATUSES.OFFLINE },
-    $or: [
-      { last_active_at: { $lt: thresholdDate } },
-      { last_active_at: null, createdAt: { $lt: thresholdDate } },
-    ],
-  });
-};
-
-const deactivateDevice = async (deviceId) => {
-  return await Device.findByIdAndUpdate(
-    deviceId,
-    { status: DEVICE_STATUSES.OFFLINE },
-    { new: true }
-  );
 };
 
 const getDeviceStats = async (userId) => {
@@ -153,6 +104,55 @@ const getDevicesByType = async (userId) => {
     },
     { $sort: { count: -1 } },
   ]);
+};
+
+const updateDevice = async (deviceId, userId, updateData) => {
+  const device = await Device.findOneAndUpdate(
+    { _id: deviceId, owner_id: userId },
+    updateData,
+    { new: true, runValidators: true }
+  );
+  if (!device) throw new Error('Device not found');
+  return device;
+};
+
+const deleteDevice = async (deviceId, userId) => {
+  const device = await Device.findOneAndDelete({ _id: deviceId, owner_id: userId });
+  if (!device) throw new Error('Device not found');
+  return device;
+};
+
+const recordHeartbeat = async (deviceId, userId, status) => {
+  const device = await Device.findOneAndUpdate(
+    { _id: deviceId, owner_id: userId },
+    {
+      last_active_at: new Date(),
+      ...(status && { status }),
+    },
+    { new: true }
+  );
+  if (!device) throw new Error('Device not found');
+  return device;
+};
+
+const getInactiveDevices = async (thresholdHours = 24) => {
+  const thresholdDate = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
+
+  return await Device.find({
+    status: { $ne: DEVICE_STATUSES.OFFLINE },
+    $or: [
+      { last_active_at: { $lt: thresholdDate } },
+      { last_active_at: null, createdAt: { $lt: thresholdDate } },
+    ],
+  });
+};
+
+const deactivateDevice = async (deviceId) => {
+  return await Device.findByIdAndUpdate(
+    deviceId,
+    { status: DEVICE_STATUSES.OFFLINE },
+    { new: true }
+  );
 };
 
 module.exports = {

@@ -42,7 +42,7 @@ router.get('/:id',
 );
 
 router.patch('/:id', 
-  validate(deviceParamsSchema, 'params') ,
+  validate(deviceParamsSchema, 'params'),
   validate(updateDeviceSchema), 
   deviceController.updateDevice
 );
