@@ -44,6 +44,7 @@ const getDevices = async (userId, filters = {}) => {
 const getDeviceById = async (deviceId, userId) => {
   const device = await Device.findOne({ _id: deviceId, owner_id: userId });
   if (!device) throw new Error('Device not found');
+  
   return device;
 };
 

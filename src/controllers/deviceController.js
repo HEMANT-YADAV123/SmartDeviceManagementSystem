@@ -42,7 +42,7 @@ const getDevice = async (req, res, next) => {
         message: error.message,
       });
     }
-    next(error);
+     next(error);
   }
 };
 
