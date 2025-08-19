@@ -134,7 +134,7 @@ const recordHeartbeat = async (deviceId, userId, status) => {
   if (!device) throw new Error('Device not found');
   return device;
 };
-
+ 
 const getInactiveDevices = async (thresholdHours = 24) => {
   const thresholdDate = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
 

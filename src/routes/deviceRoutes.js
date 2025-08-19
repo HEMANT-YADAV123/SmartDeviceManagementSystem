@@ -56,7 +56,7 @@ router.delete('/:id',
 router.post('/:id/heartbeat', 
   validate(deviceParamsSchema, 'params'),
   validate(heartbeatSchema), 
-  deviceController.recordHeartbeat
+  deviceController.recordHeartbeat 
 );
 
 module.exports = router;

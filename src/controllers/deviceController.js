@@ -120,7 +120,7 @@ const recordHeartbeat = async (req, res, next) => {
     const device = await deviceService.recordHeartbeat(
       req.params.id,
       req.user._id,
-      req.body.status
+      req.body.status 
     );
 
     res.status(HTTP_STATUS.OK).json({
