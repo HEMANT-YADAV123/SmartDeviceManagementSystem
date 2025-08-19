@@ -52,12 +52,14 @@ const startServer = async () => {
     });
 
     // Start background jobs (only in production)
-    if (process.env.NODE_ENV === 'production') {
-      backgroundJobService.start();
-    } else {
-      console.log('Background jobs disabled in development mode');
-      console.log('Use /api/admin/background-jobs/trigger to manually trigger jobs');
-    }
+    // if (process.env.NODE_ENV === 'production') {
+    // backgroundJobService.start();
+    // } else {
+    //   console.log('Background jobs disabled in development mode');
+    //   console.log('Use /api/admin/background-jobs/trigger to manually trigger jobs');
+    // }
+    backgroundJobService.start();
+    console.log('Background jobs enabled');
 
     // Handle graceful shutdown
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
