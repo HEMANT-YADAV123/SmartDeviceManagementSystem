@@ -1,120 +1,124 @@
 const deviceService = require('./deviceService');
 const { DEVICE_STATUSES } = require('../utils/constants');
 
-class BackgroundJobService {
-  constructor() {
-    this.isRunning = false;
-    this.intervalId = null;
-    this.thresholdHours = parseInt(process.env.DEVICE_INACTIVE_THRESHOLD_HOURS) || 24;
+let isRunning = false;
+let intervalId = null;
+let thresholdHours = parseInt(process.env.DEVICE_INACTIVE_THRESHOLD_HOURS) || 24;
+
+// Start the background job
+const start = () => {
+  if (isRunning) {
+    console.log('Background job service is already running');
+    return;
   }
 
-  start() {
-    if (this.isRunning) {
-      console.log('Background job service is already running');
+  console.log('Starting background job service...');
+  isRunning = true;
+
+  // Run immediately
+  processInactiveDevices();
+
+  // Run every hour
+  intervalId = setInterval(() => {
+    processInactiveDevices();
+  }, 60 * 60 * 1000);
+
+  console.log(`Background job service started. Checking for inactive devices every hour.`);
+};
+
+// Stop the background job
+const stop = () => {
+  if (!isRunning) {
+    console.log('Background job service is not running');
+    return;
+  }
+
+  console.log('Stopping background job service...');
+  isRunning = false;
+
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+  }
+
+  console.log('Background job service stopped');
+};
+
+// Process inactive devices
+const processInactiveDevices = async () => {
+  try {
+    console.log(`Checking for devices inactive for more than ${thresholdHours} hours...`);
+
+    const inactiveDevices = await deviceService.getInactiveDevices(thresholdHours);
+
+    if (inactiveDevices.length === 0) {
+      console.log('No inactive devices found');
       return;
     }
 
-    console.log('Starting background job service...');
-    this.isRunning = true;
+    console.log(`Found ${inactiveDevices.length} inactive devices. Deactivating...`);
 
-    // Run immediately
-    this.processInactiveDevices();
+    const results = await Promise.allSettled(
+      inactiveDevices.map(device => deactivateDevice(device))
+    );
 
-    // Run every hour
-    this.intervalId = setInterval(() => {
-      this.processInactiveDevices();
-    }, 60 * 60 * 1000); // 1 hour
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
 
-    console.log(`Background job service started. Checking for inactive devices every hour.`);
-  }
+    console.log(`Device deactivation completed. Success: ${successful}, Failed: ${failed}`);
 
-  stop() {
-    if (!this.isRunning) {
-      console.log('Background job service is not running');
-      return;
+    if (failed > 0) {
+      console.error('Some devices failed to deactivate:');
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Device ${inactiveDevices[index]._id}: ${result.reason.message}`);
+        }
+      });
     }
-
-    console.log('Stopping background job service...');
-    this.isRunning = false;
-
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-
-    console.log('Background job service stopped');
+  } catch (error) {
+    console.error('Error processing inactive devices:', error.message);
   }
+};
 
-  async processInactiveDevices() {
-    try {
-      console.log(`Checking for devices inactive for more than ${this.thresholdHours} hours...`);
-      
-      const inactiveDevices = await deviceService.getInactiveDevices(this.thresholdHours);
-      
-      if (inactiveDevices.length === 0) {
-        console.log('No inactive devices found');
-        return;
-      }
-
-      console.log(`Found ${inactiveDevices.length} inactive devices. Deactivating...`);
-
-      const deactivationPromises = inactiveDevices.map(device => 
-        this.deactivateDevice(device)
-      );
-
-      const results = await Promise.allSettled(deactivationPromises);
-      
-      const successful = results.filter(result => result.status === 'fulfilled').length;
-      const failed = results.filter(result => result.status === 'rejected').length;
-
-      console.log(`Device deactivation completed. Success: ${successful}, Failed: ${failed}`);
-
-      if (failed > 0) {
-        console.error('Some devices failed to deactivate:');
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            console.error(`Device ${inactiveDevices[index]._id}: ${result.reason.message}`);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Error processing inactive devices:', error.message);
-    }
+// Deactivate a single device
+const deactivateDevice = async (device) => {
+  try {
+    await deviceService.deactivateDevice(device._id);
+    console.log(`Deactivated device: ${device.name} (${device._id}) - Last active: ${device.last_active_at || 'Never'}`);
+  } catch (error) {
+    console.error(`Failed to deactivate device ${device._id}:`, error.message);
+    throw error;
   }
+};
 
-  async deactivateDevice(device) {
-    try {
-      await deviceService.deactivateDevice(device._id);
-      console.log(`Deactivated device: ${device.name} (${device._id}) - Last active: ${device.last_active_at || 'Never'}`);
-    } catch (error) {
-      console.error(`Failed to deactivate device ${device._id}:`, error.message);
-      throw error;
-    }
+// Get status of the background job
+const getStatus = () => ({
+  isRunning,
+  thresholdHours,
+  nextRun: intervalId ? new Date(Date.now() + 60 * 60 * 1000) : null,
+});
+
+// Manually trigger check
+const triggerManualCheck = async () => {
+  console.log('Manual device inactivity check triggered');
+  await processInactiveDevices();
+};
+
+// Update threshold hours
+const updateThresholdHours = (hours) => {
+  if (hours && hours > 0) {
+    thresholdHours = hours;
+    console.log(`Updated inactive device threshold to ${hours} hours`);
+  } else {
+    throw new Error('Threshold hours must be a positive number');
   }
+};
 
-  getStatus() {
-    return {
-      isRunning: this.isRunning,
-      thresholdHours: this.thresholdHours,
-      nextRun: this.intervalId ? new Date(Date.now() + 60 * 60 * 1000) : null,
-    };
-  }
-
-  // Method to manually trigger the process (useful for testing)
-  async triggerManualCheck() {
-    console.log('Manual device inactivity check triggered');
-    await this.processInactiveDevices();
-  }
-
-  // Method to update threshold hours
-  updateThresholdHours(hours) {
-    if (hours && hours > 0) {
-      this.thresholdHours = hours;
-      console.log(`Updated inactive device threshold to ${hours} hours`);
-    } else {
-      throw new Error('Threshold hours must be a positive number');
-    }
-  }
-}
-
-module.exports = new BackgroundJobService();
+module.exports = {
+  start,
+  stop,
+  processInactiveDevices,
+  getStatus,
+  triggerManualCheck,
+  updateThresholdHours,
+};
