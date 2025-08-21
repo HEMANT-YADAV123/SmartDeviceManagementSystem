@@ -1,5 +1,6 @@
 const Device = require('../models/Device');
 const { DEVICE_STATUSES } = require('../utils/constants');
+const cacheService = require('./cacheService');
 
 const createDevice = async (deviceData, userId) => {
   const device = new Device({
@@ -7,11 +8,25 @@ const createDevice = async (deviceData, userId) => {
     owner_id: userId,
   });
   await device.save();
+
+  // Invalidate user's device cache
+  await cacheService.invalidateUserDevices(userId);
+  await cacheService.invalidateStats(userId);
+
   return device;
 };
 
 const getDevices = async (userId, filters = {}) => {
   const { type, status, page = 1, limit = 10 } = filters;
+
+  // Try cache first
+  const cachedResult = await cacheService.getCachedDevices(userId, filters);
+  if (cachedResult) {
+    console.log('Cache HIT: Device list');
+    return cachedResult;
+  }
+
+  console.log('Cache MISS: Device list - fetching from DB');
 
   const query = { owner_id: userId };
   if (type) query.type = type;
@@ -28,7 +43,7 @@ const getDevices = async (userId, filters = {}) => {
     Device.countDocuments(query),
   ]);
 
-  return {
+  const result = {
     devices,
     pagination: {
       page,
@@ -39,6 +54,11 @@ const getDevices = async (userId, filters = {}) => {
       hasPrevPage: page > 1,
     },
   };
+
+  // Cache the result
+  await cacheService.cacheDevices(userId, filters, result);
+
+  return result;
 };
 
 const getDeviceById = async (deviceId, userId) => {
@@ -49,6 +69,15 @@ const getDeviceById = async (deviceId, userId) => {
 };
 
 const getDeviceStats = async (userId) => {
+  // Try cache first
+  const cachedStats = await cacheService.getCachedStats(userId);
+  if (cachedStats) {
+    console.log('Cache HIT: Device stats');
+    return cachedStats;
+  }
+
+  console.log('Cache MISS: Device stats - fetching from DB');
+
   const stats = await Device.aggregate([
     { $match: { owner_id: userId } },
     {
@@ -81,15 +110,18 @@ const getDeviceStats = async (userId) => {
     },
   ]);
 
-  return (
-    stats[0] || {
-      totalDevices: 0,
-      activeDevices: 0,
-      inactiveDevices: 0,
-      offlineDevices: 0,
-      maintenanceDevices: 0,
-    }
-  );
+  const result = stats[0] || {
+    totalDevices: 0,
+    activeDevices: 0,
+    inactiveDevices: 0,
+    offlineDevices: 0,
+    maintenanceDevices: 0,
+  };
+
+  // Cache the stats
+  await cacheService.cacheStats(userId, result);
+
+  return result;
 };
 
 const getDevicesByType = async (userId) => {
@@ -112,13 +144,30 @@ const updateDevice = async (deviceId, userId, updateData) => {
     updateData,
     { new: true, runValidators: true }
   );
+  
   if (!device) throw new Error('Device not found');
+
+  // Invalidate related caches
+  await Promise.all([
+    cacheService.invalidateUserDevices(userId),
+    cacheService.invalidateStats(userId),
+    cacheService.invalidateUserAnalytics(userId),
+  ]);
+
   return device;
 };
 
 const deleteDevice = async (deviceId, userId) => {
   const device = await Device.findOneAndDelete({ _id: deviceId, owner_id: userId });
   if (!device) throw new Error('Device not found');
+
+  // Invalidate related caches
+  await Promise.all([
+    cacheService.invalidateUserDevices(userId),
+    cacheService.invalidateStats(userId),
+    cacheService.invalidateUserAnalytics(userId),
+  ]);
+
   return device;
 };
 
@@ -131,7 +180,14 @@ const recordHeartbeat = async (deviceId, userId, status) => {
     },
     { new: true }
   );
+  
   if (!device) throw new Error('Device not found');
+
+  // Invalidate stats cache if status changed
+  if (status) {
+    await cacheService.invalidateStats(userId);
+  }
+
   return device;
 };
  

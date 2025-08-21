@@ -3,10 +3,6 @@ require('dotenv').config();
 
 const connectDB = async () => {
   try {
-    console.log("NODE_ENV:", process.env.NODE_ENV);
-    console.log("MONGODB_URI:", process.env.MONGODB_URI);
-    console.log("MONGODB_URI_TEST:", process.env.MONGODB_URI_TEST);
-
     const mongoURI = process.env.NODE_ENV === 'test' 
       ? process.env.MONGODB_URI_TEST 
       : process.env.MONGODB_URI;

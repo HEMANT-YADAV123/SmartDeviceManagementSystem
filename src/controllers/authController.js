@@ -1,6 +1,11 @@
 const authService = require('../services/authService');
 const { HTTP_STATUS } = require('../utils/constants');
 
+const getClientInfo = (req) => ({
+  ipAddress: req.ip || req.connection.remoteAddress,
+  userAgent: req.get('User-Agent'),
+});
+
 const signup = async (req, res, next) => {
   try {
     const user = await authService.signup(req.body);
@@ -23,12 +28,13 @@ const signup = async (req, res, next) => {
 
 const login = async (req, res, next) => {
   try {
-    const { token, user } = await authService.login(req.body);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const result = await authService.login(req.body, ipAddress, userAgent);
 
     res.status(HTTP_STATUS.OK).json({
       success: true,
-      token,
-      user,
+      message: 'Login successful',
+      ...result,
     });
   } catch (error) {
     if (error.message === 'Invalid credentials') {
@@ -37,6 +43,43 @@ const login = async (req, res, next) => {
         message: error.message,
       });
     }
+    next(error);
+  }
+};
+
+const refreshTokens = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+    const { ipAddress, userAgent } = getClientInfo(req);
+    
+    const tokens = await authService.refreshUserTokens(refreshToken, ipAddress, userAgent);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Tokens refreshed successfully',
+      ...tokens,
+    });
+  } catch (error) {
+    if (error.message === 'Invalid refresh token') {
+      return res.status(HTTP_STATUS.UNAUTHORIZED).json({
+        success: false,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+};
+
+const logout = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+    await authService.logout(refreshToken);
+
+    res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (error) {
     next(error);
   }
 };
@@ -99,6 +142,8 @@ const updateProfile = async (req, res, next) => {
 module.exports = {
   signup,
   login,
+  refreshTokens,
+  logout,
   getProfile,
   updateProfile,
 };

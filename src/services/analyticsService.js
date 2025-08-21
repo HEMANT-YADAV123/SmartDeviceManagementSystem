@@ -2,6 +2,7 @@ const DeviceLog = require('../models/DeviceLog');
 const Device = require('../models/Device');
 const { LOG_EVENTS } = require('../utils/constants');
 const mongoose = require('mongoose');
+const cacheService = require('./cacheService');
 
 /**
  * Verify device ownership helper
@@ -26,6 +27,10 @@ const createLog = async (deviceId, userId, logData) => {
   });
 
   await log.save();
+
+  // Invalidate analytics cache for user
+  await cacheService.invalidateUserAnalytics(userId);
+
   return log;
 };
 
@@ -34,6 +39,16 @@ const createLog = async (deviceId, userId, logData) => {
  */
 const getDeviceLogs = async (deviceId, userId, filters = {}) => {
   await verifyDevice(deviceId, userId);
+
+  // Try cache first
+  const cacheKey = { deviceId, filters };
+  const cachedLogs = await cacheService.getCachedAnalytics(userId, 'logs', cacheKey);
+  if (cachedLogs) {
+    console.log('Cache HIT: Device logs');
+    return cachedLogs;
+  }
+
+  console.log('Cache MISS: Device logs - fetching from DB');
 
   const { limit = 10, event, from, to } = filters;
   const query = { device_id: deviceId };
@@ -46,17 +61,32 @@ const getDeviceLogs = async (deviceId, userId, filters = {}) => {
     if (to) query.timestamp.$lte = new Date(to);
   }
 
-  return await DeviceLog.find(query)
+  const logs = await DeviceLog.find(query)
     .sort({ timestamp: -1 })
     .limit(limit)
     .lean();
+
+  // Cache the result
+  await cacheService.cacheAnalytics(userId, 'logs', cacheKey, logs);
+
+  return logs;
 };
 
 /**
- * Get usage statistics for a device
+ * Get usage statistics for a device with caching
  */
 const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => {
   await verifyDevice(deviceId, userId);
+
+  // Try cache first
+  const cacheKey = { deviceId, range, event };
+  const cachedUsage = await cacheService.getCachedAnalytics(userId, 'usage', cacheKey);
+  if (cachedUsage) {
+    console.log('Cache HIT: Device usage');
+    return cachedUsage;
+  }
+
+  console.log('Cache MISS: Device usage - fetching from DB');
 
   const now = new Date();
   const rangeMap = {
@@ -76,24 +106,9 @@ const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => 
     timestamp: { $gte: startTime, $lte: now } 
   };
 
-  // Debug logging
-  console.log('Query details:', {
-    deviceId,
-    deviceObjectId,
-    startTime,
-    endTime: now,
-    matchQuery
-  });
-
-  // Check if there are any logs for this device (without time filter)
-  const totalLogsForDevice = await DeviceLog.countDocuments({ device_id: deviceObjectId });
-  console.log(`Total logs for device ${deviceId}:`, totalLogsForDevice);
-
-  // Check logs within time range
-  const logsInRange = await DeviceLog.countDocuments(matchQuery);
-  console.log(`Logs in time range:`, logsInRange);
-
   if (event) matchQuery.event = event;
+
+  let result;
 
   if (event === LOG_EVENTS.UNITS_CONSUMED || !event) {
     const unitsConsumed = await DeviceLog.aggregate([
@@ -110,9 +125,7 @@ const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => 
       },
     ]);
 
-    console.log('Units consumed aggregation result:', unitsConsumed);
-
-    const result = {
+    result = {
       device_id: deviceId,
       range,
       period: { start: startTime, end: now },
@@ -131,30 +144,48 @@ const getDeviceUsage = async (deviceId, userId, range = '24h', event = null) => 
       result[`total_units_last_${range}`] = 0;
       result.statistics = { totalEvents: 0, averageConsumption: 0, minConsumption: 0, maxConsumption: 0 };
     }
+  } else {
+    const eventStats = await DeviceLog.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: '$event',
+          count: { $sum: 1 },
+          values: { $push: '$value' },
+          timestamps: { $push: '$timestamp' },
+        },
+      },
+      { $sort: { count: -1 } },
+    ]);
 
-    return result;
+    result = { 
+      device_id: deviceId, 
+      range, 
+      period: { start: startTime, end: now }, 
+      eventStatistics: eventStats 
+    };
   }
 
-  const eventStats = await DeviceLog.aggregate([
-    { $match: matchQuery },
-    {
-      $group: {
-        _id: '$event',
-        count: { $sum: 1 },
-        values: { $push: '$value' },
-        timestamps: { $push: '$timestamp' },
-      },
-    },
-    { $sort: { count: -1 } },
-  ]);
+  // Cache the result
+  await cacheService.cacheAnalytics(userId, 'usage', cacheKey, result);
 
-  return { device_id: deviceId, range, period: { start: startTime, end: now }, eventStatistics: eventStats };
+  return result;
 };
 
 /**
- * Get aggregated usage across all devices of a user
+ * Get aggregated usage across all devices of a user with caching
  */
 const getAggregatedUsage = async (userId, range = '24h') => {
+  // Try cache first
+  const cacheKey = { range };
+  const cachedUsage = await cacheService.getCachedAnalytics(userId, 'aggregated', cacheKey);
+  if (cachedUsage) {
+    console.log('Cache HIT: Aggregated usage');
+    return cachedUsage;
+  }
+
+  console.log('Cache MISS: Aggregated usage - fetching from DB');
+
   const now = new Date();
   const rangeMap = {
     '1h': 60 * 60 * 1000,
@@ -171,7 +202,15 @@ const getAggregatedUsage = async (userId, range = '24h') => {
   const deviceIds = userDevices.map(d => d._id);
 
   if (deviceIds.length === 0) {
-    return { totalUnits: 0, deviceBreakdown: [], period: { start: startTime, end: now } };
+    const result = { 
+      totalUnits: 0, 
+      deviceBreakdown: [], 
+      period: { start: startTime, end: now } 
+    };
+    
+    // Cache empty result too
+    await cacheService.cacheAnalytics(userId, 'aggregated', cacheKey, result);
+    return result;
   }
 
   const consumption = await DeviceLog.aggregate([
@@ -199,7 +238,7 @@ const getAggregatedUsage = async (userId, range = '24h') => {
 
   const totalUnits = consumption.reduce((sum, item) => sum + item.totalUnits, 0);
 
-  return {
+  const result = {
     user_id: userId,
     range,
     period: { start: startTime, end: now },
@@ -208,12 +247,27 @@ const getAggregatedUsage = async (userId, range = '24h') => {
     activeDevices: consumption.length,
     deviceBreakdown: deviceBreakdown.sort((a, b) => b.total_units - a.total_units),
   };
+
+  // Cache the result
+  await cacheService.cacheAnalytics(userId, 'aggregated', cacheKey, result);
+
+  return result;
 };
 
 /**
- * Get top events across all devices of a user
+ * Get top events across all devices of a user with caching
  */
 const getTopEvents = async (userId, range = '24h', limit = 10) => {
+  // Try cache first
+  const cacheKey = { range, limit };
+  const cachedEvents = await cacheService.getCachedAnalytics(userId, 'topEvents', cacheKey);
+  if (cachedEvents) {
+    console.log('Cache HIT: Top events');
+    return cachedEvents;
+  }
+
+  console.log('Cache MISS: Top events - fetching from DB');
+
   const now = new Date();
   const rangeMap = {
     '1h': 60 * 60 * 1000,
@@ -243,12 +297,17 @@ const getTopEvents = async (userId, range = '24h', limit = 10) => {
     { $limit: limit },
   ]);
 
-  return topEvents.map(event => ({
+  const result = topEvents.map(event => ({
     event: event._id,
     count: event.count,
     uniqueDevices: event.devices.length,
     latestTimestamp: event.latestTimestamp,
   }));
+
+  // Cache the result
+  await cacheService.cacheAnalytics(userId, 'topEvents', cacheKey, result);
+
+  return result;
 };
 
 module.exports = {
