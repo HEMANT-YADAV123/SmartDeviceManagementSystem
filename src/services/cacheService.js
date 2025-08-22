@@ -3,9 +3,12 @@ const { getRedisClient } = require("../config/redis");
 // Define TTL constants
 const TTL = {
   devices: 30 * 60, // 30 minutes
+  device: 15 * 60, // 15 minutes for single device
   user: 30 * 60, // 30 minutes
   analytics: 5 * 60, // 5 minutes
   stats: 10 * 60, // 10 minutes
+  devicesByType: 20 * 60, // 20 minutes for devices by type
+  inactiveDevices: 5 * 60, // 5 minutes for inactive devices (time-sensitive)
 };
 
 // Cache stats tracker
@@ -130,7 +133,7 @@ const deletePatternCache = async (pattern) => {
   }
 };
 
-// --- Device-specific cache functions ---
+// --- Device List cache functions (existing) ---
 const cacheDevices = async (userId, filters, data) => {
   const key = generateKey("devices", userId, JSON.stringify(filters));
   return setCache(key, data, TTL.devices);
@@ -146,7 +149,61 @@ const invalidateUserDevices = async (userId) => {
   return deletePatternCache(pattern);
 };
 
-// --- User cache functions ---
+// --- NEW: Single Device cache functions ---
+const cacheDevice = async (deviceId, userId, data) => {
+  const key = generateKey("device", deviceId, userId);
+  return setCache(key, data, TTL.device);
+};
+
+const getCachedDevice = async (deviceId, userId) => {
+  const key = generateKey("device", deviceId, userId);
+  return getCache(key);
+};
+
+const invalidateDevice = async (deviceId, userId) => {
+  const key = generateKey("device", deviceId, userId);
+  return deleteCache(key);
+};
+
+// --- NEW: Devices by Type cache functions ---
+const cacheDevicesByType = async (userId, data) => {
+  const key = generateKey("devices_by_type", userId);
+  return setCache(key, data, TTL.devicesByType);
+};
+
+const getCachedDevicesByType = async (userId) => {
+  const key = generateKey("devices_by_type", userId);
+  return getCache(key);
+};
+
+const invalidateDevicesByType = async (userId) => {
+  const key = generateKey("devices_by_type", userId);
+  return deleteCache(key);
+};
+
+// --- NEW: Inactive Devices cache functions ---
+const cacheInactiveDevices = async (thresholdHours, data) => {
+  const key = generateKey("inactive_devices hrs", thresholdHours);
+  return setCache(key, data, TTL.inactiveDevices);
+};
+
+const getCachedInactiveDevices = async (thresholdHours) => {
+  const key = generateKey("inactive_devices", thresholdHours);
+  return getCache(key);
+};
+
+const invalidateInactiveDevices = async (thresholdHours = null) => {
+  if (thresholdHours) {
+    const key = generateKey("inactive_devices", thresholdHours);
+    return deleteCache(key);
+  } else {
+    // Invalidate all inactive device caches
+    const pattern = generateKey("inactive_devices", "*");
+    return deletePatternCache(pattern);
+  }
+};
+
+// --- User cache functions (existing) ---
 const cacheUser = async (userId, userData) => {
   const key = generateKey("user", userId);
   return setCache(key, userData, TTL.user);
@@ -162,7 +219,7 @@ const invalidateUser = async (userId) => {
   return deleteCache(key);
 };
 
-// --- Analytics cache functions ---
+// --- Analytics cache functions (existing) ---
 const cacheAnalytics = async (userId, type, params, data) => {
   const key = generateKey("analytics", userId, type, JSON.stringify(params));
   return setCache(key, data, TTL.analytics);
@@ -178,7 +235,7 @@ const invalidateUserAnalytics = async (userId) => {
   return deletePatternCache(pattern);
 };
 
-// --- Stats cache functions ---
+// --- Stats cache functions (existing) ---
 const cacheStats = async (userId, data) => {
   const key = generateKey("stats", userId);
   return setCache(key, data, TTL.stats);
@@ -218,6 +275,19 @@ const cacheHealthCheck = async () => {
   }
 };
 
+// --- NEW: Batch invalidation helper ---
+const invalidateAllUserCaches = async (userId) => {
+  console.log(`🧹 BATCH INVALIDATION: All caches for user ${userId}`);
+  
+  return Promise.all([
+    invalidateUserDevices(userId),
+    invalidateStats(userId),
+    invalidateUserAnalytics(userId),
+    invalidateDevicesByType(userId),
+    invalidateUser(userId),
+  ]);
+};
+
 // --- Export ---
 module.exports = {
   // Core
@@ -227,22 +297,43 @@ module.exports = {
   deleteCache,
   deletePatternCache,
 
-  // Domain-specific
+  // Device Lists
   cacheDevices,
   getCachedDevices,
   invalidateUserDevices,
 
+  // Single Device (NEW)
+  cacheDevice,
+  getCachedDevice,
+  invalidateDevice,
+
+  // Devices by Type (NEW)
+  cacheDevicesByType,
+  getCachedDevicesByType,
+  invalidateDevicesByType,
+
+  // Inactive Devices (NEW)
+  cacheInactiveDevices,
+  getCachedInactiveDevices,
+  invalidateInactiveDevices,
+
+  // User
   cacheUser,
   getCachedUser,
   invalidateUser,
 
+  // Analytics
   cacheAnalytics,
   getCachedAnalytics,
   invalidateUserAnalytics,
 
+  // Stats
   cacheStats,
   getCachedStats,
   invalidateStats,
+
+  // Batch operations (NEW)
+  invalidateAllUserCaches,
 
   // Health & stats
   cacheHealthCheck,
