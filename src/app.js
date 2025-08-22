@@ -84,6 +84,147 @@ if (process.env.NODE_ENV === 'development') {
       });
     }
   });
+
+  // NEW REDIS MONITORING ENDPOINTS
+  
+  // Get Redis cache statistics
+  app.get('/api/admin/cache/stats', async (req, res) => {
+    try {
+      const redisClient = getRedisClient();
+      if (!redisClient) {
+        return res.json({
+          success: false,
+          message: 'Redis not connected',
+        });
+      }
+
+      const info = await redisClient.info('keyspace');
+      const memory = await redisClient.info('memory');
+      
+      res.json({
+        success: true,
+        keyspace: info,
+        memory: memory,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  });
+
+  // Get all Redis keys (be careful in production!)
+  app.get('/api/admin/cache/keys', async (req, res) => {
+    try {
+      const redisClient = getRedisClient();
+      if (!redisClient) {
+        return res.json({
+          success: false,
+          message: 'Redis not connected',
+        });
+      }
+
+      const pattern = req.query.pattern || '*';
+      const keys = await redisClient.keys(pattern);
+      
+      res.json({
+        success: true,
+        keys: keys,
+        count: keys.length,
+        pattern: pattern,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  });
+
+  // Get specific key value
+  app.get('/api/admin/cache/get/:key', async (req, res) => {
+    try {
+      const redisClient = getRedisClient();
+      if (!redisClient) {
+        return res.json({
+          success: false,
+          message: 'Redis not connected',
+        });
+      }
+
+      const { key } = req.params;
+      const value = await redisClient.get(key);
+      const ttl = await redisClient.ttl(key);
+      
+      res.json({
+        success: true,
+        key: key,
+        value: value ? JSON.parse(value) : null,
+        ttl: ttl,
+        exists: !!value,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+        key: req.params.key,
+      });
+    }
+  });
+
+  // Clear specific cache key
+  app.delete('/api/admin/cache/clear/:key', async (req, res) => {
+    try {
+      const redisClient = getRedisClient();
+      if (!redisClient) {
+        return res.json({
+          success: false,
+          message: 'Redis not connected',
+        });
+      }
+
+      const { key } = req.params;
+      const result = await redisClient.del(key);
+      
+      res.json({
+        success: true,
+        key: key,
+        deleted: result === 1,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  });
+
+  // Flush all cache (use with caution!)
+  app.delete('/api/admin/cache/flush', async (req, res) => {
+    try {
+      const redisClient = getRedisClient();
+      if (!redisClient) {
+        return res.json({
+          success: false,
+          message: 'Redis not connected',
+        });
+      }
+
+      await redisClient.flushdb();
+      
+      res.json({
+        success: true,
+        message: 'All cache cleared',
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  });
 }
 
 // 404 handler

@@ -111,8 +111,8 @@ const generateTokenPair = async (user, ipAddress = null, userAgent = null) => {
     role: user.role,
   };
 
-  const accessToken = generateToken(payload);
-  const refreshToken = await generateRefreshToken(user._id || user.id, ipAddress, userAgent);
+  const accessToken = generateToken(payload);//using JWT , expire after 15 min
+  const refreshToken = await generateRefreshToken(user._id || user.id, ipAddress, userAgent);//using uuid stores in db
 
   return {
     accessToken,

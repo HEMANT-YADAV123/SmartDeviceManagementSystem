@@ -1,6 +1,8 @@
 const app = require('./app');
 const { connectDB } = require('./config/database');
+const { connectRedis } = require('./config/redis');
 const backgroundJobService = require('./services/backgroundJobService');
+const cacheService = require('./services/cacheService');
 
 const PORT = process.env.PORT || 3000;
 
@@ -43,6 +45,11 @@ const startServer = async () => {
     // Connect to database
     await connectDB();
     console.log('Database connected successfully');
+
+    // Connect to Redis
+    await connectRedis();
+    const redisHealth = await cacheService.cacheHealthCheck();
+    console.log('Redis status:', redisHealth);
     
     // Start the server
     const server = app.listen(PORT, () => {

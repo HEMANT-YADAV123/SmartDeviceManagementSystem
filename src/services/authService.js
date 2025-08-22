@@ -63,11 +63,11 @@ const login = async (credentials, ipAddress = null, userAgent = null) => {
     role: user.role,
   };
   
-  await cacheService.cacheUser(user._id, userData);
+  await cacheService.cacheUser(user._id, userData);//caches the user
 
   return {
-    ...tokens,
-    user: userData,
+    ...tokens,//return the token 
+    user: userData,//and the cached user's data(id,mail,name,role)
   };
 };
 
@@ -94,6 +94,7 @@ const getUserById = async (userId) => {
   // Try cache first
   let user = await cacheService.getCachedUser(userId);
   
+  //if not found in Cache(redis) then search in MongoDB.
   if (!user) {
     // Cache miss - fetch from database
     const dbUser = await User.findById(userId);

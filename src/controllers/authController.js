@@ -2,7 +2,9 @@ const authService = require('../services/authService');
 const { HTTP_STATUS } = require('../utils/constants');
 
 const getClientInfo = (req) => ({
+  // Gets the client's IP address from the request object
   ipAddress: req.ip || req.connection.remoteAddress,
+   // Gets the client's Browser/Device info from the 'User-Agent' header
   userAgent: req.get('User-Agent'),
 });
 
