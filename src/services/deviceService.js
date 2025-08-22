@@ -1,6 +1,7 @@
 const Device = require('../models/Device');
 const { DEVICE_STATUSES } = require('../utils/constants');
 const cacheService = require('./cacheService');
+const websocketService = require('./websocketService'); // ADD THIS
 
 const createDevice = async (deviceData, userId) => {
   const device = new Device({
@@ -13,8 +14,18 @@ const createDevice = async (deviceData, userId) => {
   await Promise.all([
     cacheService.invalidateUserDevices(userId),
     cacheService.invalidateStats(userId),
-    cacheService.invalidateDevicesByType(userId), // NEW: Invalidate device by type cache
+    cacheService.invalidateDevicesByType(userId),
   ]);
+
+  // Notify via WebSocket
+  websocketService.notifyDeviceUpdate(userId.toString(), {
+    action: 'created',
+    device: device.toObject(),
+  });
+
+  console.log(`🔔 WebSocket notification attempted for user: ${userId}`);
+  const wsStats = websocketService.getStats();
+  console.log(`📊 Current WebSocket stats:`, wsStats);
 
   return device;
 };
@@ -65,7 +76,7 @@ const getDevices = async (userId, filters = {}) => {
 };
 
 const getDeviceById = async (deviceId, userId) => {
-  // NEW: Try cache first for individual device
+  // Try cache first for individual device
   const cachedDevice = await cacheService.getCachedDevice(deviceId, userId);
   if (cachedDevice) {
     console.log('Cache HIT: Single device');
@@ -140,7 +151,7 @@ const getDeviceStats = async (userId) => {
 };
 
 const getDevicesByType = async (userId) => {
-  // NEW: Try cache first
+  // Try cache first
   const cachedDevicesByType = await cacheService.getCachedDevicesByType(userId);
   if (cachedDevicesByType) {
     console.log('Cache HIT: Devices by type');
@@ -168,22 +179,31 @@ const getDevicesByType = async (userId) => {
 };
 
 const updateDevice = async (deviceId, userId, updateData) => {
+  const oldDevice = await Device.findOne({ _id: deviceId, owner_id: userId }).lean();
+  if (!oldDevice) throw new Error('Device not found');
+
   const device = await Device.findOneAndUpdate(
     { _id: deviceId, owner_id: userId },
     updateData,
     { new: true, runValidators: true }
   );
-  
-  if (!device) throw new Error('Device not found');
 
-  // Invalidate related caches (ENHANCED)
+  // Invalidate related caches
   await Promise.all([
     cacheService.invalidateUserDevices(userId),
     cacheService.invalidateStats(userId),
     cacheService.invalidateUserAnalytics(userId),
-    cacheService.invalidateDevice(deviceId, userId), // NEW: Invalidate single device cache
-    cacheService.invalidateDevicesByType(userId), // NEW: Invalidate devices by type cache
+    cacheService.invalidateDevice(deviceId, userId),
+    cacheService.invalidateDevicesByType(userId),
   ]);
+
+  // Notify via WebSocket
+  websocketService.notifyDeviceUpdate(userId.toString(), {
+    action: 'updated',
+    device: device.toObject(),
+    changes: updateData,
+    previousStatus: oldDevice.status,
+  });
 
   return device;
 };
@@ -192,19 +212,28 @@ const deleteDevice = async (deviceId, userId) => {
   const device = await Device.findOneAndDelete({ _id: deviceId, owner_id: userId });
   if (!device) throw new Error('Device not found');
 
-  // Invalidate related caches (ENHANCED)
+  // Invalidate related caches
   await Promise.all([
     cacheService.invalidateUserDevices(userId),
     cacheService.invalidateStats(userId),
     cacheService.invalidateUserAnalytics(userId),
-    cacheService.invalidateDevice(deviceId, userId), // NEW: Invalidate single device cache
-    cacheService.invalidateDevicesByType(userId), // NEW: Invalidate devices by type cache
+    cacheService.invalidateDevice(deviceId, userId),
+    cacheService.invalidateDevicesByType(userId),
   ]);
+
+  // Notify via WebSocket
+  websocketService.notifyDeviceUpdate(userId.toString(), {
+    action: 'deleted',
+    device: device.toObject(),
+  });
 
   return device;
 };
 
 const recordHeartbeat = async (deviceId, userId, status) => {
+  const oldDevice = await Device.findOne({ _id: deviceId, owner_id: userId }).lean();
+  if (!oldDevice) throw new Error('Device not found');
+
   const device = await Device.findOneAndUpdate(
     { _id: deviceId, owner_id: userId },
     {
@@ -213,16 +242,14 @@ const recordHeartbeat = async (deviceId, userId, status) => {
     },
     { new: true }
   );
-  
-  if (!device) throw new Error('Device not found');
 
-  // NEW: Enhanced cache invalidation for heartbeat
+  // Enhanced cache invalidation for heartbeat
   const invalidationPromises = [
-    cacheService.invalidateDevice(deviceId, userId), // Invalidate single device cache
+    cacheService.invalidateDevice(deviceId, userId),
   ];
 
   // If status changed, invalidate stats and devices by type
-  if (status) {
+  if (status && status !== oldDevice.status) {
     invalidationPromises.push(
       cacheService.invalidateStats(userId),
       cacheService.invalidateDevicesByType(userId)
@@ -231,13 +258,28 @@ const recordHeartbeat = async (deviceId, userId, status) => {
 
   await Promise.all(invalidationPromises);
 
+  // Notify via WebSocket - CRITICAL for real-time updates
+  websocketService.notifyDeviceHeartbeat(
+    userId.toString(), 
+    deviceId, 
+    device.status, 
+    device.last_active_at
+  );
+
+  // If status changed significantly, send full device update
+  if (status && status !== oldDevice.status) {
+    websocketService.notifyDeviceUpdate(userId.toString(), {
+      action: 'status_changed',
+      device: device.toObject(),
+      previousStatus: oldDevice.status,
+      newStatus: device.status,
+    });
+  }
+
   return device;
 };
 
-// NEW: Cache inactive devices query (useful for background jobs)
 const getInactiveDevices = async (thresholdHours = 24) => {
-  const cacheKey = `inactive_devices:${thresholdHours}h`;
-  
   // Try cache first
   const cachedInactiveDevices = await cacheService.getCachedInactiveDevices(thresholdHours);
   if (cachedInactiveDevices) {
@@ -271,13 +313,21 @@ const deactivateDevice = async (deviceId) => {
   );
 
   if (device) {
-    // NEW: Invalidate relevant caches when deactivating
+    // Invalidate relevant caches when deactivating
     await Promise.all([
       cacheService.invalidateDevice(deviceId, device.owner_id),
       cacheService.invalidateStats(device.owner_id),
       cacheService.invalidateUserDevices(device.owner_id),
       cacheService.invalidateDevicesByType(device.owner_id),
     ]);
+
+    // Notify via WebSocket
+    websocketService.notifyDeviceUpdate(device.owner_id, {
+      action: 'deactivated',
+      device: device.toObject(),
+      previousStatus: 'active',
+      newStatus: DEVICE_STATUSES.OFFLINE,
+    });
   }
 
   return device;
