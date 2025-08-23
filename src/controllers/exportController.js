@@ -9,7 +9,7 @@ const exportDeviceLogs = async (req, res, next) => {
       req.body
     );
 
-    res.status(HTTP_STATUS.ACCEPTED).json({
+    res.status(HTTP_STATUS.OK).json({
       success: true,
       message: 'Export job created successfully',
       ...result,
@@ -27,7 +27,7 @@ const exportUsageReport = async (req, res, next) => {
       req.body
     );
 
-    res.status(HTTP_STATUS.ACCEPTED).json({
+    res.status(HTTP_STATUS.OK).json({
       success: true,
       message: 'Export job created successfully',
       ...result,

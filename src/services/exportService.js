@@ -44,141 +44,178 @@ class ExportService {
 
   // Process export job
   async processJob(jobId) {
-    const job = this.activeJobs.get(jobId);
-    if (!job) return;
+  const job = this.activeJobs.get(jobId);
+  if (!job) return;
 
-    try {
-      job.status = 'processing';
-      job.startedAt = new Date();
-      job.progress = 10;
+  try {
+    job.status = 'processing';
+    job.startedAt = new Date();
+    job.progress = 10;
 
-      console.log(`Starting export job ${jobId} for user ${job.userId}`);
+    console.log(`Starting export job ${jobId} for user ${job.userId}`);
 
-      let result;
-      switch (job.type) {
-        case 'device_logs':
-          result = await this.exportDeviceLogs(job);
-          break;
-        case 'usage_report':
-          result = await this.exportUsageReport(job);
-          break;
-        default:
-          throw new Error('Invalid export type');
-      }
-
-      job.status = 'completed';
-      job.completedAt = new Date();
-      job.result = result;
-      job.progress = 100;
-
-      console.log(`Export job ${jobId} completed successfully`);
-
-      // Simulate email notification
-      this.simulateEmailNotification(job);
-
-      // Clean up job after 1 hour
-      setTimeout(() => {
-        this.activeJobs.delete(jobId);
-        console.log(`Cleaned up export job ${jobId}`);
-      }, 60 * 60 * 1000);
-
-    } catch (error) {
-      console.error(`Export job ${jobId} failed:`, error.message);
-      
-      job.status = 'failed';
-      job.error = error.message;
-      job.completedAt = new Date();
-
-      // Clean up failed job after 30 minutes
-      setTimeout(() => {
-        this.activeJobs.delete(jobId);
-      }, 30 * 60 * 1000);
+    let result;
+    switch (job.type) {
+      case 'device_logs':
+        result = await this.exportDeviceLogs(job);
+        break;
+      case 'usage_report':
+        result = await this.exportUsageReport(job);
+        break;
+      default:
+        throw new Error('Invalid export type');
     }
+
+    job.status = 'completed';
+    job.completedAt = new Date();
+    job.result = result;
+    job.progress = 100;
+
+    console.log(`Export job ${jobId} completed successfully`);
+    console.log(`Job result stored:`, !!job.result);
+
+    // Simulate email notification
+    this.simulateEmailNotification(job);
+
+    // Clean up job after 1 hour (but log it)
+    setTimeout(() => {
+      console.log(`🕐 Cleaning up export job ${jobId} after 1 hour`);
+      this.activeJobs.delete(jobId);
+      console.log(`Cleaned up export job ${jobId}`);
+    }, 60 * 60 * 1000);
+
+  } catch (error) {
+    console.error(`Export job ${jobId} failed:`, error.message);
+    
+    job.status = 'failed';
+    job.error = error.message;
+    job.completedAt = new Date();
+
+    // Clean up failed job after 30 minutes
+    setTimeout(() => {
+      console.log(`🕐 Cleaning up failed export job ${jobId} after 30 minutes`);
+      this.activeJobs.delete(jobId);
+    }, 30 * 60 * 1000);
   }
+}
 
   // Export device logs
-  async exportDeviceLogs(job) {
-    const { userId, params } = job;
-    const { deviceId, format = 'csv', dateFrom, dateTo, event } = params;
+  // Add this debugging to your exportDeviceLogs method in exportService.js
 
-    job.progress = 20;
+async exportDeviceLogs(job) {
+  const { userId, params } = job;
+  const { deviceId, format = 'csv', dateFrom, dateTo, event } = params;
 
-    // Build query
-    const query = {};
-    
-    if (deviceId) {
-      // Verify device ownership
-      const device = await Device.findOne({ _id: deviceId, owner_id: userId });
-      if (!device) {
-        throw new Error('Device not found');
-      }
-      query.device_id = deviceId;
-    } else {
-      // Get all user devices
-      const userDevices = await Device.find({ owner_id: userId }).select('_id');
-      query.device_id = { $in: userDevices.map(d => d._id) };
+  job.progress = 20;
+
+  // Build query
+  const query = {};
+  let deviceInfo = null;
+  
+  if (deviceId) {
+    // Verify device ownership
+    const device = await Device.findOne({ _id: deviceId, owner_id: userId });
+    if (!device) {
+      throw new Error('Device not found');
     }
-
-    if (event) {
-      query.event = event;
-    }
-
-    if (dateFrom || dateTo) {
-      query.timestamp = {};
-      if (dateFrom) query.timestamp.$gte = new Date(dateFrom);
-      if (dateTo) query.timestamp.$lte = new Date(dateTo);
-    }
-
-    job.progress = 40;
-
-    // Fetch logs with device info
-    const logs = await DeviceLog.aggregate([
-      { $match: query },
-      {
-        $lookup: {
-          from: 'devices',
-          localField: 'device_id',
-          foreignField: '_id',
-          as: 'device',
-        },
-      },
-      { $unwind: '$device' },
-      {
-        $project: {
-          timestamp: 1,
-          event: 1,
-          value: 1,
-          metadata: 1,
-          deviceId: '$device._id',
-          deviceName: '$device.name',
-          deviceType: '$device.type',
-          deviceStatus: '$device.status',
-        },
-      },
-      { $sort: { timestamp: -1 } },
-    ]);
-
-    job.progress = 70;
-
-    // Format data
-    let result;
-    if (format === 'csv') {
-      result = await this.formatAsCSV(logs, 'device_logs');
-    } else {
-      result = {
-        format: 'json',
-        data: logs,
-        metadata: {
-          totalRecords: logs.length,
-          exportedAt: new Date(),
-          query: params,
-        },
-      };
-    }
-
-    job.progress = 90;
-    return result;
+    console.log('Device found:', device.name, device._id);
+    deviceInfo = device;
+    query.device_id = deviceId;
+  } else {
+    // Get all user devices
+    const userDevices = await Device.find({ owner_id: userId }).select('_id');
+    console.log('User devices found:', userDevices.length);
+    query.device_id = { $in: userDevices.map(d => d._id) };
   }
+
+  if (event) {
+    query.event = event;
+    console.log('Event filter:', event);
+  }
+
+  if (dateFrom || dateTo) {
+    query.timestamp = {};
+    if (dateFrom) query.timestamp.$gte = new Date(dateFrom);
+    if (dateTo) query.timestamp.$lte = new Date(dateTo);
+    console.log('Date range:', query.timestamp);
+  }
+
+  // DEBUG: Log the final query
+  console.log('MongoDB Query:', JSON.stringify(query, null, 2));
+
+  job.progress = 40;
+
+  // DEBUG: First check raw count
+  const rawCount = await DeviceLog.countDocuments(query);
+  console.log('Raw log count matching query:', rawCount);
+
+  // Fetch logs directly (no aggregation)
+  const rawLogs = await DeviceLog.find(query).sort({ timestamp: -1 });
+  console.log('Raw logs found:', rawLogs.length);
+
+  job.progress = 60;
+
+  // If we have multiple devices, fetch all device info
+  let deviceMap = new Map();
+  
+  if (!deviceId) {
+    // For multiple devices, get all device info
+    const allDevices = await Device.find({ owner_id: userId });
+    allDevices.forEach(device => {
+      deviceMap.set(device._id.toString(), device);
+    });
+    console.log('Device map created for', deviceMap.size, 'devices');
+  } else {
+    // For single device, we already have the info
+    deviceMap.set(deviceId, deviceInfo);
+  }
+
+  // Combine the data in JavaScript
+  const logs = rawLogs.map(log => {
+    const device = deviceMap.get(log.device_id.toString());
+    return {
+      timestamp: log.timestamp,
+      event: log.event,
+      value: log.value,
+      metadata: log.metadata || {},
+      deviceId: log.device_id,
+      deviceName: device?.name || 'Unknown Device',
+      deviceType: device?.type || 'unknown',
+      deviceStatus: device?.status || 'unknown',
+    };
+  });
+
+  console.log('Final processed results:', logs.length);
+  if (logs.length > 0) {
+    console.log('First result sample:', {
+      timestamp: logs[0].timestamp,
+      event: logs[0].event,
+      value: logs[0].value,
+      deviceName: logs[0].deviceName
+    });
+  }
+  
+  job.progress = 70;
+
+  // Format data
+  let result;
+  if (format === 'csv') {
+    result = await this.formatAsCSV(logs, 'device_logs');
+  } else {
+    result = {
+      format: 'json',
+      data: logs,
+      metadata: {
+        totalRecords: logs.length,
+        exportedAt: new Date(),
+        query: params,
+      },
+    };
+  }
+
+  job.progress = 90;
+  return result;
+}
 
   // Export usage report
   async exportUsageReport(job) {
@@ -371,19 +408,58 @@ class ExportService {
     };
   }
 
-  // Get job result
-  getJobResult(jobId, userId) {
-    const job = this.activeJobs.get(jobId);
-    if (!job || job.userId !== userId) {
-      return null;
-    }
-
-    if (job.status !== 'completed') {
-      return null;
-    }
-
-    return job.result;
+  getAllActiveJobs() {
+  console.log('🔍 All active jobs:');
+  console.log('Total jobs:', this.activeJobs.size);
+  
+  for (const [jobId, job] of this.activeJobs.entries()) {
+    console.log(`Job ${jobId}:`, {
+      status: job.status,
+      userId: job.userId,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+      hasResult: !!job.result
+    });
   }
+  
+  return Array.from(this.activeJobs.entries());
+}
+
+  // Get job result
+  // Get job result
+getJobResult(jobId, userId) {
+  console.log('🔍 getJobResult called with:', { 
+    jobId, 
+    userId: userId.toString(),
+    totalActiveJobs: this.activeJobs.size 
+  });
+  
+  const job = this.activeJobs.get(jobId);
+  console.log('📋 Found job:', job ? 'YES' : 'NO');
+  
+  if (!job) {
+    console.log('❌ Job not found. Available jobs:', Array.from(this.activeJobs.keys()));
+    return null;
+  }
+
+  // Convert both to strings for comparison
+  const jobUserId = job.userId.toString();
+  const requestUserId = userId.toString();
+  
+  if (jobUserId !== requestUserId) {
+    console.log('❌ User ID mismatch:', { jobUserId, requestUserId });
+    return null;
+  }
+
+  if (job.status !== 'completed') {
+    console.log('❌ Job not completed:', job.status);
+    return null;
+  }
+
+  console.log('✅ Job result exists:', !!job.result);
+  console.log('✅ Result format:', job.result?.format);
+  return job.result;
+}
 
   // Simulate email notification
   simulateEmailNotification(job) {

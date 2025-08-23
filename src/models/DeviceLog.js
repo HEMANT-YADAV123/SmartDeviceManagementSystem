@@ -39,6 +39,7 @@ const deviceLogSchema = new mongoose.Schema({
 // Indexes for faster queries
 deviceLogSchema.index({ device_id: 1 });
 deviceLogSchema.index({ device_id: 1, timestamp: -1 });
+deviceLogSchema.index({device_id: 1, event:1 ,timestamp: -1});
 deviceLogSchema.index({ event: 1 });
 deviceLogSchema.index({ timestamp: -1 });
 

@@ -1,24 +1,22 @@
 services:
+  # Main Application
   app:
     build: .
     container_name: sdms-app
+    env_file: .env.docker
     ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      # Use Atlas instead of local Mongo
-      - MONGODB_URI=mongodb+srv://hy700793:DeviceManagement@cluster0.hilbffv.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-      - JWT_SECRET=your_super_secret_jwt_key_here
-      - JWT_EXPIRES_IN=7d
-      - DEVICE_INACTIVE_THRESHOLD_HOURS=24
-      - RATE_LIMIT_WINDOW_MS=60000
-      - RATE_LIMIT_MAX_REQUESTS=100
+      - "3001:3000"
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   app-network:

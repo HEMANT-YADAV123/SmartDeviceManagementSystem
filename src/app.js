@@ -3,6 +3,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
 const morgan = require("morgan");
+const exportRoutes = require("./routes/exportRoutes");
 require("dotenv").config();
 
 
@@ -66,6 +67,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/exports", exportRoutes);
 
 // Admin/Debug endpoints (only in development)
 if (process.env.NODE_ENV === "development") {

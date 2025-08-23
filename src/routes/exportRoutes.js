@@ -26,6 +26,16 @@ router.post('/usage-report',
   exportController.exportUsageReport
 );
 
+// Add to your exportRoutes.js
+router.get('/debug/active-jobs', (req, res) => {
+  const jobs = exportService.getAllActiveJobs();
+  res.json({ 
+    success: true, 
+    activeJobs: jobs.length,
+    jobs: jobs 
+  });
+});
+
 // Check job status
 router.get('/jobs/:jobId/status', 
   validate(jobParamsSchema, 'params'),
